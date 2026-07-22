@@ -530,14 +530,15 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl) {
 // Fetch a single game's artwork from Steam
 async function fetchSteamArt(gameName) {
   try {
-    const proxyUrl = 'https://corsproxy.io/?url=';
-    const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
+    // Use Steam's griddb API which returns CORS-friendly responses
+    const steamSearch = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(gameName)}`;
     
-    const res = await fetch(proxyUrl + encodeURIComponent(steamSearch), { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(steamSearch, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
 
-    if (data.items && data.items.length > 0) {
-      const appId = data.items[0].id;
+    if (data && data.length > 0) {
+      const appId = data[0].appid;
+      // Direct CDN link - no proxy needed
       const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
       return imageUrl;
     }
