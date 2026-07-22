@@ -84,8 +84,15 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .filter-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 .filter-group{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .filter-group .flabel{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin-right:4px;}
-.chip{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:6px 13px;cursor:pointer;user-select:none;transition:all .15s;white-space:nowrap;}
-.chip:hover{border-color:var(--text-faint);color:var(--text);}
+
+/* Animations & Snappy Interactions */
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chip{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:6px 13px;cursor:pointer;user-select:none;transition:all .15s cubic-bezier(0.2, 0.8, 0.2, 1);white-space:nowrap;}
+.chip:hover{border-color:var(--text-faint);color:var(--text);transform:scale(1.04);}
+.chip:active{transform:scale(0.96);}
 .chip.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
 .chip.tier-perfect.active{border-color:var(--perfect);color:var(--perfect);background:var(--perfect-soft);}
 .chip.tier-playable.active{border-color:var(--playable);color:var(--playable);background:var(--playable-soft);}
@@ -93,11 +100,14 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .chip.tier-borked.active{border-color:var(--borked);color:var(--borked);background:var(--borked-soft);}
 .result-count{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);}
 .list{padding:18px 0 60px;display:flex;flex-direction:column;gap:8px;}
-.row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color .15s, background .15s;}
-.row:hover{border-color:var(--border-soft);background:var(--surface-2);}
-.row.open{border-color:var(--accent);}
+
+/* Row Styling & Snappy Expanding */
+.row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s cubic-bezier(0.2, 0.8, 0.2, 1); animation: slideUpFade 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;}
+.row:hover{border-color:var(--border-soft);background:var(--surface-2);transform:translateY(-2px);box-shadow:0 6px 12px rgba(0,0,0,0.15);}
+.row:active{transform:translateY(0);}
+.row.open{border-color:var(--accent);background:var(--surface-2);}
 .row-head{display:grid;grid-template-columns:22px 1fr auto auto auto 18px;align-items:center;gap:14px;padding:14px 16px;}
-.chevron{color:var(--text-faint);transition:transform .18s;font-size:11px;}
+.chevron{color:var(--text-faint);transition:transform .2s cubic-bezier(0.2, 0.8, 0.2, 1);font-size:11px;}
 .row.open .chevron{transform:rotate(90deg);color:var(--accent);}
 .row-title{min-width:0;}
 .row-title .gname{font-family:var(--font-display);font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -112,9 +122,58 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .fps-tag b{color:var(--text);font-weight:600;}
 .model-tag{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap;border:1px solid var(--border);border-radius:5px;padding:4px 8px;}
 .row-head > .fps-tag, .row-head > .model-tag, .row-head > .badge{justify-self:end;}
-.row-body{max-height:0;overflow:hidden;transition:max-height .22s ease;}
-.row.open .row-body{max-height:600px;}
-.row-body-inner{padding:2px 16px 20px 52px;border-top:1px solid var(--border-soft);margin-top:2px;padding-top:16px;}
+
+/* CSS Grid 0fr Expansion (Ultra-snappy performance) */
+.row-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.row.open .row-body { grid-template-rows: 1fr; }
+.row-body-inner { overflow: hidden; min-height: 0; }
+
+.row-body-content {
+  display: flex;
+  gap: 20px;
+  padding: 2px 16px 20px 52px;
+  border-top: 1px solid var(--border-soft);
+  margin-top: 2px;
+  padding-top: 16px;
+}
+
+.spec-col { flex: 1; min-width: 0; }
+.art-col {
+  width: 231px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  position: absolute;
+  top: 0; left: 0;
+}
+.art-img.loaded { opacity: 1; }
+
+/* Skeleton Loader for Art */
+.art-skeleton {
+  width: 100%; height: 100%;
+  background: linear-gradient(90deg, var(--bg) 25%, var(--surface) 50%, var(--bg) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+
 .spec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:16px;}
 .spec{background:var(--bg);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;}
 .spec .k{font-family:var(--font-mono);font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;}
@@ -124,7 +183,8 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .launch-row{display:flex;gap:8px;align-items:stretch;}
 .launch-code{flex:1;background:var(--bg);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;font-family:var(--font-mono);font-size:12.5px;color:var(--accent);overflow-x:auto;white-space:pre;}
 .copy-btn{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);background:var(--bg);border:1px solid var(--border-soft);border-radius:8px;padding:0 14px;cursor:pointer;transition:all .15s;}
-.copy-btn:hover{border-color:var(--accent);color:var(--accent);}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent);transform:scale(1.05);}
+.copy-btn:active{transform:scale(0.95);}
 .copy-btn.copied{color:var(--perfect);border-color:var(--perfect);}
 .info-text{font-size:13.5px;color:var(--text-dim);line-height:1.6;margin-bottom:14px;}
 .submitted{font-family:var(--font-mono);font-size:11px;color:var(--text-faint);}
@@ -137,16 +197,20 @@ footer{border-top:1px solid var(--border);padding:26px 0 40px;}
 footer .foot-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
 footer p{font-family:var(--font-mono);font-size:11.5px;color:var(--text-faint);margin:0;line-height:1.7;max-width:600px;}
 footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent);}
+@media (max-width:768px){
+  .row-body-content { flex-direction: column; }
+  .art-col { width: 100%; aspect-ratio: 460 / 215; order: -1; }
+}
 @media (max-width:640px){
   .stat-rail{grid-template-columns:repeat(2,1fr);}
   .row-head{grid-template-columns:18px 1fr auto;row-gap:8px;}
   .row-head .fps-tag{display:none;}
   .row-head .model-tag{grid-column:2/4;justify-self:start;}
-  .row-body-inner{padding-left:16px;}
+  .row-body-content{padding-left:16px;}
   .result-count{margin-left:0;width:100%;order:99;}
 }
 @media (prefers-reduced-motion: reduce){
-  *{transition:none !important;}
+  *{transition:none !important; animation:none !important;}
 }
 </style>
 </head>
@@ -227,8 +291,6 @@ footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted v
 <script>
 const SHEET_ID = '1UrLwRaIZGAL6J7l9QK_DO4MB45KzIUKIfKZIOE4hid4';
 const GID = '1002118274';
-
-// gviz natively includes CORS headers, entirely removing the need for a proxy
 const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${GID}`;
 
 const FIELD_MAP = ['game', 'model', 'oc', 'ram', 'rating', 'fps', 'tool', 'launch', 'info', 'by'];
@@ -239,6 +301,9 @@ let openKey = null;
 
 const ratingOrder = {Perfect:0, Playable:1, Unplayable:2, Borked:3};
 
+// In-memory cache for game artwork so returning to a game is instantaneous
+const artworkCache = new Map();
+
 function tierClass(r){ return 'tier-' + (r||'').toLowerCase(); }
 
 function escapeHtml(s){
@@ -248,6 +313,13 @@ function escapeHtml(s){
 function fpsSortValue(fps){
   const m = (fps||'').match(/\d+/);
   return m ? parseInt(m[0],10) : 0;
+}
+
+// Generate a deterministic cool fallback gradient based on the game's name
+function getStringColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return `hsl(${hash % 360}, 65%, 25%)`;
 }
 
 function parseCSV(text) {
@@ -283,12 +355,11 @@ async function fetchSheet(){
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const csv = await res.text();
     const rows = parseCSV(csv);
-    if(!rows.length) throw new Error('No rows returned');
     
     GAMES = rows
       .filter(r => r[0] && r[0].trim())
-      .map(r => {
-        const obj = {};
+      .map((r, index) => {
+        const obj = { _id: index.toString() }; // Unique ID needed for specific art fetching
         for(let i=0; i<10; i++) obj[FIELD_MAP[i]] = (r[i] || '').trim();
         return obj;
       });
@@ -297,14 +368,9 @@ async function fetchSheet(){
     initUI();
   }catch(err){
     document.getElementById('list').innerHTML = `
-      <div class="empty">
-        Error loading sheet: ${escapeHtml(err.message)}<br><br>
-        <small>Try refreshing the page. If it persists, check that the sheet is publicly shared.</small>
-      </div>`;
+      <div class="empty">Error loading sheet: ${escapeHtml(err.message)}</div>`;
     document.getElementById('kicker').classList.remove('loading');
     document.getElementById('kicker').textContent = 'Error loading data';
-    document.getElementById('searchInput').disabled = false;
-    document.getElementById('sortSelect').disabled = false;
   }
 }
 
@@ -371,6 +437,58 @@ function initUI(){
   render();
 }
 
+async function loadGameArt(gameName, imgElementId, containerId) {
+  const imgEl = document.getElementById(imgElementId);
+  const containerEl = document.getElementById(containerId);
+  if (!imgEl || !containerEl) return;
+
+  const setFallback = () => {
+    containerEl.innerHTML = '';
+    containerEl.style.background = `linear-gradient(135deg, ${getStringColor(gameName)}, var(--bg))`;
+    artworkCache.set(gameName, 'fallback');
+  };
+
+  const applyImage = (url) => {
+    imgEl.src = url;
+    imgEl.onload = () => imgEl.classList.add('loaded');
+  };
+
+  // Check fast cache first
+  if (artworkCache.has(gameName)) {
+    const cachedUrl = artworkCache.get(gameName);
+    if (cachedUrl === 'fallback') setFallback();
+    else applyImage(cachedUrl);
+    return;
+  }
+
+  // Fetch from official Steam Search API via free proxy
+  try {
+    const proxyUrl = 'https://corsproxy.io/?url=';
+    const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
+    
+    const res = await fetch(proxyUrl + encodeURIComponent(steamSearch));
+    const data = await res.json();
+
+    if (data.items && data.items.length > 0) {
+      // Build Steam CDN URL
+      const appId = data.items[0].id;
+      const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_231x87.jpg`;
+      
+      artworkCache.set(gameName, imageUrl);
+      applyImage(imageUrl);
+      
+      // Stop skeleton animation
+      const skeleton = containerEl.querySelector('.art-skeleton');
+      if (skeleton) skeleton.style.display = 'none';
+      
+    } else {
+      setFallback();
+    }
+  } catch (err) {
+    setFallback(); // Silently fallback on failure
+  }
+}
+
 function render(){
   let items = GAMES.filter(g=>{
     if(state.search && !g.game.toLowerCase().includes(state.search)) return false;
@@ -391,13 +509,16 @@ function render(){
 
   const listEl = document.getElementById('list');
   if(!items.length){
-    listEl.innerHTML = `<div class="empty">No reports match those filters. Try clearing search or a filter chip.</div>`;
+    listEl.innerHTML = `<div class="empty">No reports match those filters.</div>`;
     return;
   }
 
-  listEl.innerHTML = items.map((g)=>{
-    const key = g.game;
+  listEl.innerHTML = items.map((g, i)=>{
+    const key = g._id;
     const isOpen = key === openKey;
+    // Staggered entrance animation for up to the first 15 items
+    const delay = Math.min(i * 0.04, 0.6); 
+    
     const launchHtml = g.launch
       ? `<div class="launch-block"><div class="k">Launch options</div>
           <div class="launch-row">
@@ -406,8 +527,9 @@ function render(){
           </div></div>`
       : '';
     const infoHtml = g.info ? `<div class="info-text">${escapeHtml(g.info)}</div>` : '';
+    
     return `
-    <div class="row ${isOpen?'open':''}" data-key="${encodeURIComponent(key)}">
+    <div class="row ${isOpen?'open':''}" data-key="${encodeURIComponent(key)}" data-name="${escapeHtml(g.game)}" style="animation-delay: ${delay}s">
       <div class="row-head">
         <span class="chevron">▶</span>
         <div class="row-title">
@@ -421,15 +543,25 @@ function render(){
       </div>
       <div class="row-body">
         <div class="row-body-inner">
-          <div class="spec-grid">
-            <div class="spec"><div class="k">Switch model</div><div class="v">${escapeHtml(g.model)}</div></div>
-            <div class="spec"><div class="k">OC profile</div><div class="v">${escapeHtml(g.oc)}</div></div>
-            <div class="spec"><div class="k">RAM OC</div><div class="v">${escapeHtml(g.ram)} MHz</div></div>
-            <div class="spec"><div class="k">Compatibility tool</div><div class="v">${escapeHtml(g.tool)}</div></div>
+          <div class="row-body-content">
+            <div class="spec-col">
+              <div class="spec-grid">
+                <div class="spec"><div class="k">Switch model</div><div class="v">${escapeHtml(g.model)}</div></div>
+                <div class="spec"><div class="k">OC profile</div><div class="v">${escapeHtml(g.oc)}</div></div>
+                <div class="spec"><div class="k">RAM OC</div><div class="v">${escapeHtml(g.ram)} MHz</div></div>
+                <div class="spec"><div class="k">Compatibility tool</div><div class="v">${escapeHtml(g.tool)}</div></div>
+              </div>
+              ${launchHtml}
+              ${infoHtml}
+              <div class="submitted">Submitted by <b>${escapeHtml(g.by)}</b></div>
+            </div>
+            
+            <div class="art-col" id="art-container-${key}">
+              <div class="art-skeleton"></div>
+              <img id="art-img-${key}" class="art-img" alt="Artwork for ${escapeHtml(g.game)}" />
+            </div>
+
           </div>
-          ${launchHtml}
-          ${infoHtml}
-          <div class="submitted">Submitted by <b>${escapeHtml(g.by)}</b></div>
         </div>
       </div>
     </div>`;
@@ -439,8 +571,15 @@ function render(){
     head.addEventListener('click', ()=>{
       const row = head.parentElement;
       const key = decodeURIComponent(row.getAttribute('data-key'));
+      const gameName = row.getAttribute('data-name');
+      
       openKey = (openKey === key) ? null : key;
       render();
+      
+      // If expanding, fetch and load the art lazy-style
+      if (openKey === key) {
+        loadGameArt(gameName, `art-img-${key}`, `art-container-${key}`);
+      }
     });
   });
 
