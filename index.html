@@ -546,21 +546,40 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId = null)
   };
 }
 
+// Steam's search API blocks direct browser CORS requests, so the search
+// lookup must go through a proxy. Public CORS proxies are individually
+// unreliable (rate limits, downtime, or blocked by ad/privacy browser
+// extensions), so we try a short list in order and use whichever
+// responds first with valid data. The header image itself is loaded
+// directly from Steam's CDN afterwards — no proxy needed for that part.
+const CORS_PROXIES = [
+  url => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+];
+
+async function fetchViaProxies(targetUrl) {
+  for (const buildProxyUrl of CORS_PROXIES) {
+    try {
+      const res = await fetch(buildProxyUrl(targetUrl), { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      return data;
+    } catch (err) {
+      // This proxy failed (blocked, down, rate-limited, or bad response) — try the next one
+      continue;
+    }
+  }
+  return null;
+}
+
 // Fetch a single game's artwork from Steam
-// Steam's search API blocks direct browser CORS requests, so we route
-// just the search lookup through allorigins.win. The actual header image
-// is then loaded directly from Steam's CDN (steamcdn-a.akamaihd.net),
-// which allows cross-origin <img> loads fine.
 async function fetchSteamArt(gameName) {
   try {
     const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(steamSearch)}`;
+    const data = await fetchViaProxies(steamSearch);
 
-    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    if (data.items && data.items.length > 0) {
+    if (data && data.items && data.items.length > 0) {
       const appId = data.items[0].id;
       const imageUrl = `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/header.jpg`;
       return { imageUrl, appId };
