@@ -547,18 +547,21 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId = null)
 }
 
 // Fetch a single game's artwork from Steam
-// Uses direct Steam CDN by trying common app IDs from Steam search
+// Steam's search API blocks direct browser CORS requests, so we route
+// just the search lookup through allorigins.win. The actual header image
+// is then loaded directly from Steam's CDN (steamcdn-a.akamaihd.net),
+// which allows cross-origin <img> loads fine.
 async function fetchSteamArt(gameName) {
   try {
-    // Try the official Steam store search API to get appId
     const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
-    
-    const res = await fetch(steamSearch, { signal: AbortSignal.timeout(5000) });
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(steamSearch)}`;
+
+    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
     if (data.items && data.items.length > 0) {
       const appId = data.items[0].id;
-      // Use steamcdn-a.akamaihd.net CDN directly
       const imageUrl = `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/header.jpg`;
       return { imageUrl, appId };
     }
