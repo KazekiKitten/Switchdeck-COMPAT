@@ -336,7 +336,7 @@ const artworkCache = new Map();
 const artFetchQueue = [];
 let artFetchInProgress = false;
 const MAX_CONCURRENT_ART_FETCHES = 1;
-const ART_FETCH_DELAY = 2000; // ms delay between each fetch
+const ART_FETCH_DELAY = 800; // ms delay between each fetch
 
 function tierClass(r){ return 'tier-' + (r||'').toLowerCase(); }
 
@@ -547,9 +547,10 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId = null)
 }
 
 // Fetch a single game's artwork from Steam
+// Uses direct Steam CDN by trying common app IDs from Steam search
 async function fetchSteamArt(gameName) {
   try {
-    // Try the official Steam store search API
+    // Try the official Steam store search API to get appId
     const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
     
     const res = await fetch(steamSearch, { signal: AbortSignal.timeout(5000) });
@@ -557,8 +558,8 @@ async function fetchSteamArt(gameName) {
 
     if (data.items && data.items.length > 0) {
       const appId = data.items[0].id;
-      // Direct CDN link - no proxy needed
-      const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
+      // Use steamcdn-a.akamaihd.net CDN directly
+      const imageUrl = `https://steamcdn-a.akamaihd.net/steam/apps/${appId}/header.jpg`;
       return { imageUrl, appId };
     }
     return { imageUrl: 'fallback', appId: null };
@@ -686,9 +687,9 @@ function render(listChanged){
     const animClass = isNew ? 'animate-in' : '';
     const animStyle = isNew ? ` style="animation-delay: ${delay}s"` : '';
     
-    // Check if game uses Linux runtime (Proton counts as Linux native for Switch context)
-    const isLinuxNative = g.tool && (g.tool.toLowerCase().includes('proton') || g.tool.toLowerCase().includes('linux'));
-    const linuxBadge = isLinuxNative ? `<span class="linux-native">🐧 LINUX NATIVE</span>` : '';
+    // Check if game uses true native Linux runtime (not Proton emulation)
+    const isLinuxNative = g.tool && g.tool.toLowerCase().includes('linux') && !g.tool.toLowerCase().includes('proton');
+    const linuxBadge = isLinuxNative ? `<span class="linux-native">LINUX NATIVE</span>` : '';
     
     const launchHtml = g.launch
       ? `<div class="launch-block"><div class="k">Launch options</div>
