@@ -85,7 +85,6 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .filter-group{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .filter-group .flabel{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin-right:4px;}
 
-/* Animations & Snappy Interactions */
 @keyframes slideUpFade {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
@@ -101,7 +100,6 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .result-count{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);}
 .list{padding:18px 0 60px;display:flex;flex-direction:column;gap:8px;}
 
-/* Row Styling & Snappy Expanding */
 .row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s cubic-bezier(0.2, 0.8, 0.2, 1); animation: slideUpFade 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;}
 .row:hover{border-color:var(--border-soft);background:var(--surface-2);transform:translateY(-2px);box-shadow:0 6px 12px rgba(0,0,0,0.15);}
 .row:active{transform:translateY(0);}
@@ -123,27 +121,14 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .model-tag{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap;border:1px solid var(--border);border-radius:5px;padding:4px 8px;}
 .row-head > .fps-tag, .row-head > .model-tag, .row-head > .badge{justify-self:end;}
 
-/* CSS Grid 0fr Expansion (Ultra-snappy performance) */
-.row-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
+.row-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .row.open .row-body { grid-template-rows: 1fr; }
 .row-body-inner { overflow: hidden; min-height: 0; }
-
-.row-body-content {
-  display: flex;
-  gap: 20px;
-  padding: 2px 16px 20px 52px;
-  border-top: 1px solid var(--border-soft);
-  margin-top: 2px;
-  padding-top: 16px;
-}
+.row-body-content { display: flex; gap: 20px; padding: 2px 16px 20px 52px; border-top: 1px solid var(--border-soft); margin-top: 2px; padding-top: 16px; }
 
 .spec-col { flex: 1; min-width: 0; }
 .art-col {
-  width: 231px;
+  width: 250px;
   flex-shrink: 0;
   border-radius: 8px;
   background: var(--bg);
@@ -154,23 +139,41 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
   align-items: center;
   justify-content: center;
 }
-.art-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0;
-  transition: opacity 0.3s ease;
+
+/* Background Blurred Image */
+.art-img-bg {
   position: absolute;
   top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  /* Scale up slightly to prevent transparent blur edges bleeding in */
+  transform: scale(1.15);
+  filter: blur(12px) brightness(0.4);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 0;
 }
-.art-img.loaded { opacity: 1; }
 
-/* Skeleton Loader for Art */
+/* Foreground Fitted Image */
+.art-img-fg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 1;
+}
+
+.art-img-bg.loaded, .art-img-fg.loaded { opacity: 1; }
+
 .art-skeleton {
   width: 100%; height: 100%;
   background: linear-gradient(90deg, var(--bg) 25%, var(--surface) 50%, var(--bg) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite linear;
+  position: relative;
+  z-index: 2;
 }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 
@@ -299,8 +302,6 @@ let GAMES = [];
 const state = { search:'', ratings:new Set(), models:new Set(), sort:'name' };
 let openKey = null;
 
-const ratingOrder = {Perfect:0, Playable:1, Unplayable:2, Borked:3};
-
 // In-memory cache for game artwork so returning to a game is instantaneous
 const artworkCache = new Map();
 
@@ -359,7 +360,7 @@ async function fetchSheet(){
     GAMES = rows
       .filter(r => r[0] && r[0].trim())
       .map((r, index) => {
-        const obj = { _id: index.toString() }; // Unique ID needed for specific art fetching
+        const obj = { _id: index.toString() };
         for(let i=0; i<10; i++) obj[FIELD_MAP[i]] = (r[i] || '').trim();
         return obj;
       });
@@ -437,10 +438,11 @@ function initUI(){
   render();
 }
 
-async function loadGameArt(gameName, imgElementId, containerId) {
-  const imgEl = document.getElementById(imgElementId);
+async function loadGameArt(gameName, bgId, fgId, containerId) {
+  const imgBg = document.getElementById(bgId);
+  const imgFg = document.getElementById(fgId);
   const containerEl = document.getElementById(containerId);
-  if (!imgEl || !containerEl) return;
+  if (!imgBg || !imgFg || !containerEl) return;
 
   const setFallback = () => {
     containerEl.innerHTML = '';
@@ -449,11 +451,16 @@ async function loadGameArt(gameName, imgElementId, containerId) {
   };
 
   const applyImage = (url) => {
-    imgEl.src = url;
-    imgEl.onload = () => imgEl.classList.add('loaded');
+    imgBg.src = url;
+    imgFg.src = url;
+    
+    // Once the foreground is loaded, reveal both
+    imgFg.onload = () => {
+      imgBg.classList.add('loaded');
+      imgFg.classList.add('loaded');
+    };
   };
 
-  // Check fast cache first
   if (artworkCache.has(gameName)) {
     const cachedUrl = artworkCache.get(gameName);
     if (cachedUrl === 'fallback') setFallback();
@@ -461,7 +468,6 @@ async function loadGameArt(gameName, imgElementId, containerId) {
     return;
   }
 
-  // Fetch from official Steam Search API via free proxy
   try {
     const proxyUrl = 'https://corsproxy.io/?url=';
     const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
@@ -470,14 +476,13 @@ async function loadGameArt(gameName, imgElementId, containerId) {
     const data = await res.json();
 
     if (data.items && data.items.length > 0) {
-      // Build Steam CDN URL
       const appId = data.items[0].id;
-      const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_231x87.jpg`;
+      // Using the higher resolution header instead of capsule for a better quality blur background
+      const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
       
       artworkCache.set(gameName, imageUrl);
       applyImage(imageUrl);
       
-      // Stop skeleton animation
       const skeleton = containerEl.querySelector('.art-skeleton');
       if (skeleton) skeleton.style.display = 'none';
       
@@ -485,7 +490,7 @@ async function loadGameArt(gameName, imgElementId, containerId) {
       setFallback();
     }
   } catch (err) {
-    setFallback(); // Silently fallback on failure
+    setFallback(); 
   }
 }
 
@@ -516,7 +521,6 @@ function render(){
   listEl.innerHTML = items.map((g, i)=>{
     const key = g._id;
     const isOpen = key === openKey;
-    // Staggered entrance animation for up to the first 15 items
     const delay = Math.min(i * 0.04, 0.6); 
     
     const launchHtml = g.launch
@@ -558,7 +562,8 @@ function render(){
             
             <div class="art-col" id="art-container-${key}">
               <div class="art-skeleton"></div>
-              <img id="art-img-${key}" class="art-img" alt="Artwork for ${escapeHtml(g.game)}" />
+              <img id="art-bg-${key}" class="art-img-bg" alt="" aria-hidden="true" />
+              <img id="art-fg-${key}" class="art-img-fg" alt="Artwork for ${escapeHtml(g.game)}" />
             </div>
 
           </div>
@@ -576,9 +581,8 @@ function render(){
       openKey = (openKey === key) ? null : key;
       render();
       
-      // If expanding, fetch and load the art lazy-style
       if (openKey === key) {
-        loadGameArt(gameName, `art-img-${key}`, `art-container-${key}`);
+        loadGameArt(gameName, `art-bg-${key}`, `art-fg-${key}`, `art-container-${key}`);
       }
     });
   });
