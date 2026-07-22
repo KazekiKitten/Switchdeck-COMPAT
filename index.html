@@ -326,6 +326,12 @@ let previousRenderKeys = new Set();
 // In-memory cache for game artwork so returning to a game is instantaneous
 const artworkCache = new Map();
 
+// Queue for fetching artwork: games waiting to have their art fetched
+// Prioritized so that the currently-viewed game fetches first
+const artFetchQueue = [];
+let artFetchInProgress = false;
+const MAX_CONCURRENT_ART_FETCHES = 2;
+
 function tierClass(r){ return 'tier-' + (r||'').toLowerCase(); }
 
 function escapeHtml(s){
@@ -396,23 +402,51 @@ async function fetchSheet(){
   }
 }
 
+function animateCounter(element, targetValue) {
+  const startValue = 0;
+  const duration = 800;
+  const startTime = performance.now();
+
+  function updateCounter(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const easeOutQuad = 1 - Math.pow(1 - progress, 2);
+    const currentValue = Math.floor(startValue + (targetValue - startValue) * easeOutQuad);
+    element.textContent = currentValue;
+
+    if (progress < 1) {
+      requestAnimationFrame(updateCounter);
+    }
+  }
+
+  requestAnimationFrame(updateCounter);
+}
+
 function initUI(){
   const total = GAMES.length;
   const perfectCt = GAMES.filter(g=>g.rating==='Perfect').length;
   const playableCt = GAMES.filter(g=>g.rating==='Playable').length;
   const unplayableCt = GAMES.filter(g=>g.rating==='Unplayable').length;
-  const borkedCt = GAMES.filter(g=>g.rating==='Borked').length;
+  const borkedCt = GAMES.filter(g=>g.rating==='Borked' || g.rating==='Unsupported').length;
   const contributors = new Set(GAMES.map(g=>g.by)).size;
 
   const statRail = document.getElementById('statRail');
   statRail.innerHTML = `
-    <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">${total}</div><div class="lbl">Games tracked</div></div>
-    <div class="stat-cell perfect"><div class="pins"><span></span><span></span><span></span></div><div class="val">${perfectCt}</div><div class="lbl">Perfect</div></div>
-    <div class="stat-cell playable"><div class="pins"><span></span><span></span><span></span></div><div class="val">${playableCt}</div><div class="lbl">Playable</div></div>
-    <div class="stat-cell unplayable"><div class="pins"><span></span><span></span><span></span></div><div class="val">${unplayableCt}</div><div class="lbl">Unplayable</div></div>
-    <div class="stat-cell borked"><div class="pins"><span></span><span></span><span></span></div><div class="val">${borkedCt}</div><div class="lbl">Borked</div></div>
-    <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">${contributors}</div><div class="lbl">Contributors</div></div>
+    <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${total}">—</div><div class="lbl">Games tracked</div></div>
+    <div class="stat-cell perfect"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${perfectCt}">—</div><div class="lbl">Perfect</div></div>
+    <div class="stat-cell playable"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${playableCt}">—</div><div class="lbl">Playable</div></div>
+    <div class="stat-cell unplayable"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${unplayableCt}">—</div><div class="lbl">Unplayable</div></div>
+    <div class="stat-cell borked"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${borkedCt}">—</div><div class="lbl">Borked</div></div>
+    <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val counter" data-target="${contributors}">—</div><div class="lbl">Contributors</div></div>
   `;
+
+  // Animate all counters after a brief delay for visual impact
+  setTimeout(() => {
+    document.querySelectorAll('.stat-cell .counter').forEach(el => {
+      const target = parseInt(el.getAttribute('data-target'), 10);
+      animateCounter(el, target);
+    });
+  }, 200);
 
   document.getElementById('kicker').classList.remove('loading');
   document.getElementById('kicker').innerHTML = `✓ Live sync · ${total} games`;
@@ -461,62 +495,119 @@ function initUI(){
   });
 
   render(true);
+
+  // Start background fetching of all game artwork, without blocking UI
+  setTimeout(() => {
+    GAMES.forEach(g => {
+      queueGameArt(g.game, null, null, null, false);
+    });
+  }, 500);
 }
 
-async function loadGameArt(gameName, bgId, fgId, containerId) {
+// Apply cached or just-fetched image to DOM elements
+function applyGameArt(gameName, bgId, fgId, containerId, imageUrl) {
   const imgBg = document.getElementById(bgId);
   const imgFg = document.getElementById(fgId);
   const containerEl = document.getElementById(containerId);
   if (!imgBg || !imgFg || !containerEl) return;
 
-  const setFallback = () => {
+  if (imageUrl === 'fallback') {
     containerEl.innerHTML = '';
     containerEl.style.background = `linear-gradient(135deg, ${getStringColor(gameName)}, var(--bg))`;
-    artworkCache.set(gameName, 'fallback');
-  };
-
-  const applyImage = (url) => {
-    imgBg.src = url;
-    imgFg.src = url;
-    
-    // Once the foreground is loaded, reveal both
-    imgFg.onload = () => {
-      imgBg.classList.add('loaded');
-      imgFg.classList.add('loaded');
-    };
-  };
-
-  if (artworkCache.has(gameName)) {
-    const cachedUrl = artworkCache.get(gameName);
-    if (cachedUrl === 'fallback') setFallback();
-    else applyImage(cachedUrl);
     return;
   }
 
+  imgBg.src = imageUrl;
+  imgFg.src = imageUrl;
+  
+  // Once the foreground is loaded, reveal both
+  imgFg.onload = () => {
+    imgBg.classList.add('loaded');
+    imgFg.classList.add('loaded');
+  };
+}
+
+// Fetch a single game's artwork from Steam
+async function fetchSteamArt(gameName) {
   try {
     const proxyUrl = 'https://corsproxy.io/?url=';
     const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
     
-    const res = await fetch(proxyUrl + encodeURIComponent(steamSearch));
+    const res = await fetch(proxyUrl + encodeURIComponent(steamSearch), { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
 
     if (data.items && data.items.length > 0) {
       const appId = data.items[0].id;
-      // Using the higher resolution header instead of capsule for a better quality blur background
       const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
-      
-      artworkCache.set(gameName, imageUrl);
-      applyImage(imageUrl);
-      
-      const skeleton = containerEl.querySelector('.art-skeleton');
-      if (skeleton) skeleton.style.display = 'none';
-      
-    } else {
-      setFallback();
+      return imageUrl;
     }
+    return 'fallback';
   } catch (err) {
-    setFallback(); 
+    return 'fallback';
   }
+}
+
+// Queue a game for artwork fetching. If it's high priority (currently viewed),
+// move it to the front; otherwise add to back.
+function queueGameArt(gameName, bgId, fgId, containerId, isHighPriority = false) {
+  // Don't queue if already cached
+  if (artworkCache.has(gameName)) {
+    applyGameArt(gameName, bgId, fgId, containerId, artworkCache.get(gameName));
+    return;
+  }
+
+  // Check if already in queue
+  const existing = artFetchQueue.find(item => item.gameName === gameName);
+  if (existing) {
+    // Update DOM IDs in case they changed, move to priority if needed
+    existing.bgId = bgId;
+    existing.fgId = fgId;
+    existing.containerId = containerId;
+    if (isHighPriority && artFetchQueue[0] !== existing) {
+      artFetchQueue.splice(artFetchQueue.indexOf(existing), 1);
+      artFetchQueue.unshift(existing);
+    }
+    return;
+  }
+
+  const task = { gameName, bgId, fgId, containerId };
+  if (isHighPriority) {
+    artFetchQueue.unshift(task);
+  } else {
+    artFetchQueue.push(task);
+  }
+
+  processArtQueue();
+}
+
+// Process the artwork fetch queue
+async function processArtQueue() {
+  if (artFetchInProgress || artFetchQueue.length === 0) return;
+
+  artFetchInProgress = true;
+
+  while (artFetchQueue.length > 0) {
+    const batch = artFetchQueue.splice(0, MAX_CONCURRENT_ART_FETCHES);
+    await Promise.all(batch.map(async task => {
+      const { gameName, bgId, fgId, containerId } = task;
+
+      if (artworkCache.has(gameName)) {
+        applyGameArt(gameName, bgId, fgId, containerId, artworkCache.get(gameName));
+        return;
+      }
+
+      const imageUrl = await fetchSteamArt(gameName);
+      artworkCache.set(gameName, imageUrl);
+      applyGameArt(gameName, bgId, fgId, containerId, imageUrl);
+    }));
+  }
+
+  artFetchInProgress = false;
+}
+
+// High-priority fetch when a user opens a game detail
+function loadGameArt(gameName, bgId, fgId, containerId) {
+  queueGameArt(gameName, bgId, fgId, containerId, true);
 }
 
 // `listChanged` should be true only when the actual set/order of visible
@@ -549,6 +640,15 @@ function render(listChanged){
   }
 
   const currentKeys = new Set(items.map(g=>g._id));
+
+  // When list changes (search/filter/sort), queue art for newly visible games
+  if (listChanged) {
+    items.forEach(g => {
+      if (!artworkCache.has(g.game)) {
+        queueGameArt(g.game, null, null, null, false);
+      }
+    });
+  }
 
   listEl.innerHTML = items.map((g, i)=>{
     const key = g._id;
