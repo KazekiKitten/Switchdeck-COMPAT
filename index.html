@@ -119,6 +119,11 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .badge.tier-playable{color:var(--playable);border-color:rgba(224,184,76,0.35);background:var(--playable-soft);}
 .badge.tier-unplayable{color:var(--unplayable);border-color:rgba(226,88,79,0.35);background:var(--unplayable-soft);}
 .badge.tier-borked{color:var(--borked);border-color:rgba(178,90,134,0.35);background:var(--borked-soft);}
+.steam-btn{font-family:var(--font-mono);font-size:11px;color:var(--text);background:linear-gradient(135deg, #1a1d23, #0a0d12);border:1px solid #1f2937;border-radius:6px;padding:8px 14px;cursor:pointer;transition:all .15s;text-decoration:none;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.steam-btn:hover{border-color:#3b82f6;background:linear-gradient(135deg, #1f2937, #111827);transform:translateY(-1px);box-shadow:0 4px 8px rgba(59, 130, 246, 0.2);}
+.steam-btn:active{transform:translateY(0);}
+.steam-btn svg{width:14px;height:14px;}
+.linux-native{font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:#10b981;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.35);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:6px;}
 .fps-tag{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);white-space:nowrap;}
 .fps-tag b{color:var(--text);font-weight:600;}
 .model-tag{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap;border:1px solid var(--border);border-radius:5px;padding:4px 8px;}
@@ -330,7 +335,8 @@ const artworkCache = new Map();
 // Prioritized so that the currently-viewed game fetches first
 const artFetchQueue = [];
 let artFetchInProgress = false;
-const MAX_CONCURRENT_ART_FETCHES = 2;
+const MAX_CONCURRENT_ART_FETCHES = 1;
+const ART_FETCH_DELAY = 2000; // ms delay between each fetch
 
 function tierClass(r){ return 'tier-' + (r||'').toLowerCase(); }
 
@@ -505,7 +511,7 @@ function initUI(){
 }
 
 // Apply cached or just-fetched image to DOM elements
-function applyGameArt(gameName, bgId, fgId, containerId, imageUrl) {
+function applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId = null) {
   const imgBg = document.getElementById(bgId);
   const imgFg = document.getElementById(fgId);
   const containerEl = document.getElementById(containerId);
@@ -514,37 +520,51 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl) {
   if (imageUrl === 'fallback') {
     containerEl.innerHTML = '';
     containerEl.style.background = `linear-gradient(135deg, ${getStringColor(gameName)}, var(--bg))`;
+    // Store fallback in cache for appId
+    if (appId) artworkCache.set(`appId:${gameName}`, appId);
     return;
   }
 
   imgBg.src = imageUrl;
   imgFg.src = imageUrl;
   
-  // Once the foreground is loaded, reveal both
+  // Store appId in cache for Steam link
+  if (appId) artworkCache.set(`appId:${gameName}`, appId);
+  
+  // Hide skeleton and show images once fg loads
   imgFg.onload = () => {
+    const skeleton = containerEl.querySelector('.art-skeleton');
+    if (skeleton) skeleton.style.display = 'none';
     imgBg.classList.add('loaded');
     imgFg.classList.add('loaded');
+  };
+
+  imgFg.onerror = () => {
+    // If image fails to load, show fallback gradient
+    containerEl.innerHTML = '';
+    containerEl.style.background = `linear-gradient(135deg, ${getStringColor(gameName)}, var(--bg))`;
   };
 }
 
 // Fetch a single game's artwork from Steam
 async function fetchSteamArt(gameName) {
   try {
-    // Use Steam's griddb API which returns CORS-friendly responses
-    const steamSearch = `https://steamcommunity.com/actions/SearchApps/${encodeURIComponent(gameName)}`;
+    // Try the official Steam store search API
+    const steamSearch = `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(gameName)}&l=english&cc=US`;
     
     const res = await fetch(steamSearch, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
 
-    if (data && data.length > 0) {
-      const appId = data[0].appid;
+    if (data.items && data.items.length > 0) {
+      const appId = data.items[0].id;
       // Direct CDN link - no proxy needed
       const imageUrl = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`;
-      return imageUrl;
+      return { imageUrl, appId };
     }
-    return 'fallback';
+    return { imageUrl: 'fallback', appId: null };
   } catch (err) {
-    return 'fallback';
+    // Silently fail - will use fallback gradient
+    return { imageUrl: 'fallback', appId: null };
   }
 }
 
@@ -593,13 +613,18 @@ async function processArtQueue() {
       const { gameName, bgId, fgId, containerId } = task;
 
       if (artworkCache.has(gameName)) {
-        applyGameArt(gameName, bgId, fgId, containerId, artworkCache.get(gameName));
+        const cachedUrl = artworkCache.get(gameName);
+        const appId = artworkCache.get(`appId:${gameName}`);
+        applyGameArt(gameName, bgId, fgId, containerId, cachedUrl, appId);
         return;
       }
 
-      const imageUrl = await fetchSteamArt(gameName);
+      const { imageUrl, appId } = await fetchSteamArt(gameName);
       artworkCache.set(gameName, imageUrl);
-      applyGameArt(gameName, bgId, fgId, containerId, imageUrl);
+      applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId);
+      
+      // Add delay before next fetch to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, ART_FETCH_DELAY));
     }));
   }
 
@@ -661,6 +686,10 @@ function render(listChanged){
     const animClass = isNew ? 'animate-in' : '';
     const animStyle = isNew ? ` style="animation-delay: ${delay}s"` : '';
     
+    // Check if game uses Linux runtime (Proton counts as Linux native for Switch context)
+    const isLinuxNative = g.tool && (g.tool.toLowerCase().includes('proton') || g.tool.toLowerCase().includes('linux'));
+    const linuxBadge = isLinuxNative ? `<span class="linux-native">🐧 LINUX NATIVE</span>` : '';
+    
     const launchHtml = g.launch
       ? `<div class="launch-block"><div class="k">Launch options</div>
           <div class="launch-row">
@@ -670,12 +699,14 @@ function render(listChanged){
       : '';
     const infoHtml = g.info ? `<div class="info-text">${escapeHtml(g.info)}</div>` : '';
     
+    const steamBtn = `<a class="steam-btn" href="https://store.steampowered.com/search?term=${encodeURIComponent(g.game)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.98 0C5.465 0 0 5.466 0 11.985c0 6.52 5.465 11.98 11.98 11.98c6.52 0 11.985-5.46 11.985-11.98C23.965 5.466 18.5 0 11.98 0zm-2.21 15.59c0 .827-.673 1.5-1.5 1.5s-1.5-.673-1.5-1.5v-7.5c0-.827.673-1.5 1.5-1.5s1.5.673 1.5 1.5v7.5zm7.5 0c0 .827-.673 1.5-1.5 1.5s-1.5-.673-1.5-1.5v-7.5c0-.827.673-1.5 1.5-1.5s1.5.673 1.5 1.5v7.5z"/></svg>View on Steam</a>`;
+    
     return `
     <div class="row ${isOpen?'open':''} ${animClass}" data-key="${encodeURIComponent(key)}" data-name="${escapeHtml(g.game)}"${animStyle}>
       <div class="row-head">
         <span class="chevron">▶</span>
         <div class="row-title">
-          <div class="gname">${escapeHtml(g.game)}</div>
+          <div class="gname">${escapeHtml(g.game)}${linuxBadge}</div>
           <div class="gmeta">${escapeHtml(g.tool)}</div>
         </div>
         <span class="badge ${tierClass(g.rating)}">${g.rating}</span>
@@ -695,7 +726,10 @@ function render(listChanged){
               </div>
               ${launchHtml}
               ${infoHtml}
-              <div class="submitted">Submitted by <b>${escapeHtml(g.by)}</b></div>
+              <div style="display:flex;gap:10px;align-items:center;margin-top:16px;">
+                <div class="submitted">Submitted by <b>${escapeHtml(g.by)}</b></div>
+                ${steamBtn}
+              </div>
             </div>
             
             <div class="art-col" id="art-container-${key}">
