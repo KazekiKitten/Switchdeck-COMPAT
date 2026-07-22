@@ -227,8 +227,9 @@ footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted v
 <script>
 const SHEET_ID = '1UrLwRaIZGAL6J7l9QK_DO4MB45KzIUKIfKZIOE4hid4';
 const GID = '1002118274';
-const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
-const CORS_PROXY = `https://corsproxy.io/?${encodeURIComponent(CSV_URL)}`;
+
+// gviz natively includes CORS headers, entirely removing the need for a proxy
+const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${GID}`;
 
 const FIELD_MAP = ['game', 'model', 'oc', 'ram', 'rating', 'fps', 'tool', 'launch', 'info', 'by'];
 
@@ -278,7 +279,7 @@ function parseCSV(text) {
 
 async function fetchSheet(){
   try{
-    const res = await fetch(CORS_PROXY);
+    const res = await fetch(GVIZ_URL);
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const csv = await res.text();
     const rows = parseCSV(csv);
@@ -298,7 +299,7 @@ async function fetchSheet(){
     document.getElementById('list').innerHTML = `
       <div class="empty">
         Error loading sheet: ${escapeHtml(err.message)}<br><br>
-        <small>The CORS proxy may be temporarily unavailable. Try refreshing the page in a few moments.</small>
+        <small>Try refreshing the page. If it persists, check that the sheet is publicly shared.</small>
       </div>`;
     document.getElementById('kicker').classList.remove('loading');
     document.getElementById('kicker').textContent = 'Error loading data';
