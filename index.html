@@ -66,14 +66,16 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .hero h1 .dim{color:var(--text-faint);}
 .hero p.lede{color:var(--text-dim);font-size:15.5px;max-width:640px;margin:0 0 28px;}
 .hero p.lede strong{color:var(--text);font-weight:600;}
-.stat-rail{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
-.stat-cell{background:var(--surface);padding:16px 18px;position:relative;}
+.stat-rail{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.stat-cell{background:var(--surface);padding:16px 14px;position:relative;}
 .stat-cell .pins{position:absolute;top:0;left:16px;right:16px;display:flex;justify-content:space-between;}
 .stat-cell .pins span{width:2px;height:5px;background:var(--border);transform:translateY(-5px);}
 .stat-cell .val{font-family:var(--font-mono);font-size:26px;font-weight:600;letter-spacing:-0.01em;}
 .stat-cell .lbl{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.08em;margin-top:4px;}
 .stat-cell.perfect .val{color:var(--perfect);}
 .stat-cell.playable .val{color:var(--playable);}
+.stat-cell.unplayable .val{color:var(--unplayable);}
+.stat-cell.borked .val{color:var(--borked);}
 .controls{padding:28px 0 14px;position:sticky;top:0;background:linear-gradient(180deg, var(--bg) 78%, transparent);z-index:5;backdrop-filter:blur(6px);}
 .search-row{display:flex;gap:10px;margin-bottom:14px;}
 .search-box{flex:1;position:relative;}
@@ -100,7 +102,8 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .result-count{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--text-faint);}
 .list{padding:18px 0 60px;display:flex;flex-direction:column;gap:8px;}
 
-.row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s cubic-bezier(0.2, 0.8, 0.2, 1); animation: slideUpFade 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;}
+.row{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color .15s, background .15s, transform .15s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow .15s cubic-bezier(0.2, 0.8, 0.2, 1);}
+.row.animate-in{animation: slideUpFade 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;}
 .row:hover{border-color:var(--border-soft);background:var(--surface-2);transform:translateY(-2px);box-shadow:0 6px 12px rgba(0,0,0,0.15);}
 .row:active{transform:translateY(0);}
 .row.open{border-color:var(--accent);background:var(--surface-2);}
@@ -200,6 +203,9 @@ footer{border-top:1px solid var(--border);padding:26px 0 40px;}
 footer .foot-inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
 footer p{font-family:var(--font-mono);font-size:11.5px;color:var(--text-faint);margin:0;line-height:1.7;max-width:600px;}
 footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted var(--accent);}
+@media (max-width:900px){
+  .stat-rail{grid-template-columns:repeat(3,1fr);}
+}
 @media (max-width:768px){
   .row-body-content { flex-direction: column; }
   .art-col { width: 100%; aspect-ratio: 460 / 215; order: -1; }
@@ -248,6 +254,8 @@ footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted v
       <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Games tracked</div></div>
       <div class="stat-cell perfect"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Perfect</div></div>
       <div class="stat-cell playable"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Playable</div></div>
+      <div class="stat-cell unplayable"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Unplayable</div></div>
+      <div class="stat-cell borked"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Borked</div></div>
       <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Contributors</div></div>
     </div>
   </section>
@@ -298,9 +306,22 @@ const GVIZ_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx
 
 const FIELD_MAP = ['game', 'model', 'oc', 'ram', 'rating', 'fps', 'tool', 'launch', 'info', 'by'];
 
+// Canonical rating order, used for sorting and to decide chip/stat order.
+// Anything not listed here (unexpected sheet values) sorts to the end.
+const RATING_ORDER = { Perfect: 0, Playable: 1, Unplayable: 2, Borked: 3 };
+function ratingRank(r){
+  return Object.prototype.hasOwnProperty.call(RATING_ORDER, r) ? RATING_ORDER[r] : 99;
+}
+
 let GAMES = [];
 const state = { search:'', ratings:new Set(), models:new Set(), sort:'name' };
 let openKey = null;
+
+// Tracks which row keys were present in the previous render so we only
+// play the entrance animation for rows that are newly appearing
+// (first load, or after a search/filter/sort change) — not on every
+// click when a row is simply being opened/closed.
+let previousRenderKeys = new Set();
 
 // In-memory cache for game artwork so returning to a game is instantaneous
 const artworkCache = new Map();
@@ -379,6 +400,8 @@ function initUI(){
   const total = GAMES.length;
   const perfectCt = GAMES.filter(g=>g.rating==='Perfect').length;
   const playableCt = GAMES.filter(g=>g.rating==='Playable').length;
+  const unplayableCt = GAMES.filter(g=>g.rating==='Unplayable').length;
+  const borkedCt = GAMES.filter(g=>g.rating==='Borked').length;
   const contributors = new Set(GAMES.map(g=>g.by)).size;
 
   const statRail = document.getElementById('statRail');
@@ -386,6 +409,8 @@ function initUI(){
     <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">${total}</div><div class="lbl">Games tracked</div></div>
     <div class="stat-cell perfect"><div class="pins"><span></span><span></span><span></span></div><div class="val">${perfectCt}</div><div class="lbl">Perfect</div></div>
     <div class="stat-cell playable"><div class="pins"><span></span><span></span><span></span></div><div class="val">${playableCt}</div><div class="lbl">Playable</div></div>
+    <div class="stat-cell unplayable"><div class="pins"><span></span><span></span><span></span></div><div class="val">${unplayableCt}</div><div class="lbl">Unplayable</div></div>
+    <div class="stat-cell borked"><div class="pins"><span></span><span></span><span></span></div><div class="val">${borkedCt}</div><div class="lbl">Borked</div></div>
     <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">${contributors}</div><div class="lbl">Contributors</div></div>
   `;
 
@@ -395,7 +420,7 @@ function initUI(){
   document.getElementById('searchInput').disabled = false;
   document.getElementById('sortSelect').disabled = false;
 
-  const allRatings = [...new Set(GAMES.map(g=>g.rating))].sort((a,b)=>ratingOrder[a]-ratingOrder[b]);
+  const allRatings = [...new Set(GAMES.map(g=>g.rating))].sort((a,b)=>ratingRank(a)-ratingRank(b));
   const allModels = [...new Set(GAMES.map(g=>g.model))].sort();
 
   const ratingFilters = document.getElementById('ratingFilters');
@@ -407,7 +432,7 @@ function initUI(){
     chip.addEventListener('click', ()=>{
       if(state.ratings.has(r)) state.ratings.delete(r); else state.ratings.add(r);
       chip.classList.toggle('active');
-      render();
+      render(true);
     });
     ratingFilters.appendChild(chip);
   });
@@ -421,21 +446,21 @@ function initUI(){
     chip.addEventListener('click', ()=>{
       if(state.models.has(m)) state.models.delete(m); else state.models.add(m);
       chip.classList.toggle('active');
-      render();
+      render(true);
     });
     modelFilters.appendChild(chip);
   });
 
   document.getElementById('searchInput').addEventListener('input', e=>{
     state.search = e.target.value.trim().toLowerCase();
-    render();
+    render(true);
   });
   document.getElementById('sortSelect').addEventListener('change', e=>{
     state.sort = e.target.value;
-    render();
+    render(true);
   });
 
-  render();
+  render(true);
 }
 
 async function loadGameArt(gameName, bgId, fgId, containerId) {
@@ -494,7 +519,11 @@ async function loadGameArt(gameName, bgId, fgId, containerId) {
   }
 }
 
-function render(){
+// `listChanged` should be true only when the actual set/order of visible
+// rows may differ from last time (initial load, search, filter, sort).
+// It stays false for a plain open/close toggle, so re-rendering to reflect
+// the open row doesn't replay the slide-up entrance animation on every row.
+function render(listChanged){
   let items = GAMES.filter(g=>{
     if(state.search && !g.game.toLowerCase().includes(state.search)) return false;
     if(state.ratings.size && !state.ratings.has(g.rating)) return false;
@@ -504,7 +533,7 @@ function render(){
 
   items.sort((a,b)=>{
     if(state.sort==='name') return a.game.localeCompare(b.game);
-    if(state.sort==='rating') return ratingOrder[a.rating]-ratingOrder[b.rating] || a.game.localeCompare(b.game);
+    if(state.sort==='rating') return ratingRank(a.rating)-ratingRank(b.rating) || a.game.localeCompare(b.game);
     if(state.sort==='fps') return fpsSortValue(b.fps)-fpsSortValue(a.fps);
     if(state.sort==='submitter') return a.by.localeCompare(b.by) || a.game.localeCompare(b.game);
     return 0;
@@ -515,13 +544,21 @@ function render(){
   const listEl = document.getElementById('list');
   if(!items.length){
     listEl.innerHTML = `<div class="empty">No reports match those filters.</div>`;
+    previousRenderKeys = new Set();
     return;
   }
+
+  const currentKeys = new Set(items.map(g=>g._id));
 
   listEl.innerHTML = items.map((g, i)=>{
     const key = g._id;
     const isOpen = key === openKey;
-    const delay = Math.min(i * 0.04, 0.6); 
+    // Only animate rows that weren't visible in the previous render pass,
+    // and only when this render was triggered by a real list change.
+    const isNew = listChanged && !previousRenderKeys.has(key);
+    const delay = isNew ? Math.min(i * 0.04, 0.6) : 0;
+    const animClass = isNew ? 'animate-in' : '';
+    const animStyle = isNew ? ` style="animation-delay: ${delay}s"` : '';
     
     const launchHtml = g.launch
       ? `<div class="launch-block"><div class="k">Launch options</div>
@@ -533,7 +570,7 @@ function render(){
     const infoHtml = g.info ? `<div class="info-text">${escapeHtml(g.info)}</div>` : '';
     
     return `
-    <div class="row ${isOpen?'open':''}" data-key="${encodeURIComponent(key)}" data-name="${escapeHtml(g.game)}" style="animation-delay: ${delay}s">
+    <div class="row ${isOpen?'open':''} ${animClass}" data-key="${encodeURIComponent(key)}" data-name="${escapeHtml(g.game)}"${animStyle}>
       <div class="row-head">
         <span class="chevron">▶</span>
         <div class="row-title">
@@ -572,6 +609,8 @@ function render(){
     </div>`;
   }).join('');
 
+  previousRenderKeys = currentKeys;
+
   listEl.querySelectorAll('.row-head').forEach(head=>{
     head.addEventListener('click', ()=>{
       const row = head.parentElement;
@@ -579,7 +618,7 @@ function render(){
       const gameName = row.getAttribute('data-name');
       
       openKey = (openKey === key) ? null : key;
-      render();
+      render(false);
       
       if (openKey === key) {
         loadGameArt(gameName, `art-bg-${key}`, `art-fg-${key}`, `art-container-${key}`);
