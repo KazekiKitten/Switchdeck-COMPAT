@@ -76,6 +76,52 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .stat-cell.playable .val{color:var(--playable);}
 .stat-cell.unplayable .val{color:var(--unplayable);}
 .stat-cell.borked .val{color:var(--borked);}
+.spotlight-card{
+  margin-top:12px;
+  background:linear-gradient(135deg, var(--accent-soft), var(--surface) 55%);
+  border:1px solid rgba(232,147,74,0.35);
+  border-radius:var(--radius);
+  padding:14px 18px;
+  display:flex;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+  cursor:pointer;
+  transition:border-color .15s, transform .15s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: slideUpFade 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.spotlight-card:hover{border-color:var(--accent);transform:translateY(-1px);}
+.spotlight-tag{
+  font-family:var(--font-mono);
+  font-size:10.5px;
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--accent);
+  background:rgba(232,147,74,0.18);
+  border:1px solid rgba(232,147,74,0.4);
+  border-radius:999px;
+  padding:5px 12px;
+  white-space:nowrap;
+  flex-shrink:0;
+}
+.spotlight-body{flex:1;min-width:0;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.spotlight-name{font-family:var(--font-display);font-weight:600;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.spotlight-meta{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+.spotlight-view-btn{
+  font-family:var(--font-mono);
+  font-size:12px;
+  color:var(--accent);
+  background:transparent;
+  border:1px solid rgba(232,147,74,0.4);
+  border-radius:8px;
+  padding:8px 14px;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:all .15s;
+  flex-shrink:0;
+}
+.spotlight-view-btn:hover{background:var(--accent-soft);border-color:var(--accent);}
 .controls{padding:28px 0 14px;position:sticky;top:0;background:linear-gradient(180deg, var(--bg) 78%, transparent);z-index:5;backdrop-filter:blur(6px);}
 .search-row{display:flex;gap:10px;margin-bottom:14px;}
 .search-box{flex:1;position:relative;}
@@ -124,6 +170,7 @@ header.top{border-bottom:1px solid var(--border);background:linear-gradient(180d
 .steam-btn:active{transform:translateY(0);}
 .steam-btn svg{width:14px;height:14px;}
 .linux-native{font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:#10b981;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.35);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:6px;}
+.new-badge{font-family:var(--font-mono);font-size:10px;font-weight:700;letter-spacing:0.05em;color:var(--accent);background:var(--accent-soft);border:1px solid rgba(232,147,74,0.4);border-radius:4px;padding:3px 8px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:6px;}
 .fps-tag{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);white-space:nowrap;}
 .fps-tag b{color:var(--text);font-weight:600;}
 .model-tag{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);white-space:nowrap;border:1px solid var(--border);border-radius:5px;padding:4px 8px;}
@@ -263,6 +310,7 @@ footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted v
       <div class="stat-cell borked"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Borked</div></div>
       <div class="stat-cell"><div class="pins"><span></span><span></span><span></span></div><div class="val">—</div><div class="lbl">Contributors</div></div>
     </div>
+    <div class="spotlight-card" id="spotlightCard" style="display:none;"></div>
   </section>
 
   <section class="controls">
@@ -276,9 +324,14 @@ footer a.src{color:var(--accent);text-decoration:none;border-bottom:1px dotted v
         <option value="rating">Sort: Rating</option>
         <option value="fps">Sort: FPS</option>
         <option value="submitter">Sort: Submitter</option>
+        <option value="recent">Sort: Recently added</option>
       </select>
     </div>
     <div class="filter-row">
+      <div class="filter-group" id="recencyFilters">
+        <span class="flabel">Recency</span>
+        <div class="chip" id="newOnlyChip">New (7d)</div>
+      </div>
       <div class="filter-group" id="ratingFilters">
         <span class="flabel">Rating</span>
       </div>
@@ -318,8 +371,69 @@ function ratingRank(r){
   return Object.prototype.hasOwnProperty.call(RATING_ORDER, r) ? RATING_ORDER[r] : 99;
 }
 
+// --- "Recently added" tracking -------------------------------------------
+// The sheet has no submission-date column, so there's no ground truth for
+// when a row was actually added. Instead we remember, per-browser, which
+// games we've already shown this visitor; anything that shows up that
+// wasn't in that snapshot gets flagged as new. This is per-browser (not a
+// shared "new to everyone" feed — that would need a real backend, which a
+// static Google-Sheet-powered page doesn't have) but it answers the
+// practical question of "what's changed since I was last here."
+const SEEN_STORAGE_KEY = 'switchdeck_seen_games_v1';
+const NEW_BADGE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // show "NEW" for 7 days
+
+function computeGameKey(g){
+  return `${g.game}|||${g.by}|||${g.model}`;
+}
+
+function loadSeenMap(){
+  try {
+    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    // Storage disabled/blocked (private browsing, some browser settings) —
+    // treat every visit as a first visit; nothing breaks, "NEW" just won't show.
+    return null;
+  }
+}
+
+function saveSeenMap(map){
+  try {
+    localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    // ignore — same reasoning as above
+  }
+}
+
+// Tags each game with _firstSeenAt and _isNew, and persists an updated
+// baseline. On a visitor's very first-ever visit, nothing is flagged NEW
+// (there's no prior snapshot to compare against) — otherwise every game
+// would show NEW the first time anyone opens the page.
+let newGamesThisVisit = 0;
+function applyRecentlyAddedTracking(){
+  const stored = loadSeenMap();
+  const isFirstVisit = !stored;
+  const map = stored || {};
+  const now = Date.now();
+  newGamesThisVisit = 0;
+
+  GAMES.forEach(g => {
+    const key = computeGameKey(g);
+    if (!(key in map)) {
+      // Back-date first-visit baseline entries so they never show as NEW;
+      // otherwise mark with "now" so they display as new for the next 7 days.
+      map[key] = isFirstVisit ? (now - NEW_BADGE_WINDOW_MS - 1) : now;
+    }
+    g._firstSeenAt = map[key];
+    g._isNew = !isFirstVisit && (now - map[key] < NEW_BADGE_WINDOW_MS);
+    if (g._isNew) newGamesThisVisit++;
+  });
+
+  saveSeenMap(map);
+}
+
 let GAMES = [];
-const state = { search:'', ratings:new Set(), models:new Set(), sort:'name' };
+const state = { search:'', ratings:new Set(), models:new Set(), sort:'name', newOnly:false };
 let openKey = null;
 
 // Tracks which row keys were present in the previous render so we only
@@ -399,6 +513,7 @@ async function fetchSheet(){
       });
     
     if(!GAMES.length) throw new Error('No valid game rows parsed');
+    applyRecentlyAddedTracking();
     initUI();
   }catch(err){
     document.getElementById('list').innerHTML = `
@@ -455,7 +570,10 @@ function initUI(){
   }, 200);
 
   document.getElementById('kicker').classList.remove('loading');
-  document.getElementById('kicker').innerHTML = `✓ Live sync · ${total} games`;
+  const newBit = newGamesThisVisit > 0 ? ` · ${newGamesThisVisit} new since your last visit` : '';
+  document.getElementById('kicker').innerHTML = `✓ Live sync · ${total} games${newBit}`;
+
+  renderSpotlight();
   document.getElementById('footCount').textContent = `${total} reports · live from sheet`;
   document.getElementById('searchInput').disabled = false;
   document.getElementById('sortSelect').disabled = false;
@@ -489,6 +607,12 @@ function initUI(){
       render(true);
     });
     modelFilters.appendChild(chip);
+  });
+
+  document.getElementById('newOnlyChip').addEventListener('click', (e)=>{
+    state.newOnly = !state.newOnly;
+    e.target.classList.toggle('active');
+    render(true);
   });
 
   document.getElementById('searchInput').addEventListener('input', e=>{
@@ -544,6 +668,56 @@ function applyGameArt(gameName, bgId, fgId, containerId, imageUrl, appId = null)
     containerEl.innerHTML = '';
     containerEl.style.background = `linear-gradient(135deg, ${getStringColor(gameName)}, var(--bg))`;
   };
+}
+
+// Shows the single most-recently-added game as a highlighted spotlight
+// card below the stat rail. Only appears when there's actually a game
+// tagged NEW this visit (see applyRecentlyAddedTracking) — hidden entirely
+// on a visitor's first-ever visit, since nothing is flagged new yet.
+function renderSpotlight(){
+  const spotlightEl = document.getElementById('spotlightCard');
+  const newest = GAMES
+    .filter(g => g._isNew)
+    .sort((a,b) => (b._firstSeenAt||0) - (a._firstSeenAt||0))[0];
+
+  if(!newest){
+    spotlightEl.style.display = 'none';
+    spotlightEl.innerHTML = '';
+    return;
+  }
+
+  spotlightEl.style.display = 'flex';
+  spotlightEl.innerHTML = `
+    <div class="spotlight-tag">Recently added</div>
+    <div class="spotlight-body">
+      <div class="spotlight-name">${escapeHtml(newest.game)}</div>
+      <div class="spotlight-meta">
+        <span class="badge ${tierClass(newest.rating)}">${newest.rating}</span>
+        <span class="model-tag">${escapeHtml(newest.model.replace('Switch ',''))}</span>
+      </div>
+    </div>
+    <button class="spotlight-view-btn" id="spotlightViewBtn">View report →</button>
+  `;
+
+  const goToGame = () => {
+    state.search = '';
+    state.ratings.clear();
+    state.models.clear();
+    state.newOnly = false;
+    document.getElementById('searchInput').value = '';
+    document.querySelectorAll('#ratingFilters .chip, #modelFilters .chip, #newOnlyChip').forEach(c => c.classList.remove('active'));
+    openKey = newest._id;
+    render(true);
+    requestAnimationFrame(() => {
+      const rowEl = document.querySelector(`.row[data-key="${encodeURIComponent(newest._id)}"]`);
+      if (rowEl) {
+        rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        loadGameArt(newest.game, `art-bg-${newest._id}`, `art-fg-${newest._id}`, `art-container-${newest._id}`);
+      }
+    });
+  };
+
+  spotlightEl.addEventListener('click', goToGame);
 }
 
 // Steam's search API blocks direct browser CORS requests, so the search
@@ -668,6 +842,7 @@ function render(listChanged){
     if(state.search && !g.game.toLowerCase().includes(state.search)) return false;
     if(state.ratings.size && !state.ratings.has(g.rating)) return false;
     if(state.models.size && !state.models.has(g.model)) return false;
+    if(state.newOnly && !g._isNew) return false;
     return true;
   });
 
@@ -676,6 +851,7 @@ function render(listChanged){
     if(state.sort==='rating') return ratingRank(a.rating)-ratingRank(b.rating) || a.game.localeCompare(b.game);
     if(state.sort==='fps') return fpsSortValue(b.fps)-fpsSortValue(a.fps);
     if(state.sort==='submitter') return a.by.localeCompare(b.by) || a.game.localeCompare(b.game);
+    if(state.sort==='recent') return (b._firstSeenAt||0)-(a._firstSeenAt||0) || a.game.localeCompare(b.game);
     return 0;
   });
 
@@ -712,6 +888,7 @@ function render(listChanged){
     // Check if game uses true native Linux runtime (not Proton emulation)
     const isLinuxNative = g.tool && g.tool.toLowerCase().includes('linux') && !g.tool.toLowerCase().includes('proton');
     const linuxBadge = isLinuxNative ? `<span class="linux-native">LINUX NATIVE</span>` : '';
+    const newBadge = g._isNew ? `<span class="new-badge">NEW</span>` : '';
     
     const launchHtml = g.launch
       ? `<div class="launch-block"><div class="k">Launch options</div>
@@ -729,7 +906,7 @@ function render(listChanged){
       <div class="row-head">
         <span class="chevron">▶</span>
         <div class="row-title">
-          <div class="gname">${escapeHtml(g.game)}${linuxBadge}</div>
+          <div class="gname">${escapeHtml(g.game)}${newBadge}${linuxBadge}</div>
           <div class="gmeta">${escapeHtml(g.tool)}</div>
         </div>
         <span class="badge ${tierClass(g.rating)}">${g.rating}</span>
